@@ -18,7 +18,7 @@ const state = {
   recallRevealed: false,
   lastAction: null,
   confirmDialog: null,
-  strokeOrderSite: "jisho",
+  strokeOrderSite: "kanjialive",
   lookUpSite: "jisho",
   kanjiFont: "system",
 };
@@ -28,16 +28,17 @@ const state = {
    ======================================== */
 
 const STROKE_ORDER_SITES = {
+  kanjialive: { label: "Kanji Alive", url: (k) => `https://app.kanjialive.com/${encodeURIComponent(k)}` },
   jisho: { label: "Jisho", url: (k) => `https://jisho.org/search/${k}%20%23kanji` },
   strokeorder: { label: "Stroke Order Navi", url: (k) => `https://kanji-stroke-order.com/kanji/u${k.codePointAt(0).toString(16)}` },
-  kanjialive: { label: "Kanji Alive", url: (k) => `https://app.kanjialive.com/${encodeURIComponent(k)}` },
 };
 
 const LOOKUP_SITES = {
   jisho: { label: "Jisho", url: (k) => `https://jisho.org/search/${k}%20%23kanji` },
   wanikani: { label: "WaniKani", url: (k) => `https://www.wanikani.com/kanji/${encodeURIComponent(k)}` },
-  tangorin: { label: "Tangorin", url: (k) => `https://tangorin.com/kanji/${encodeURIComponent(k)}` },
   kanshudo: { label: "Kanshudo", url: (k) => `https://www.kanshudo.com/kanji/${encodeURIComponent(k)}` },
+  kanjimap: { label: "The Kanji Map", url: (k) => `https://thekanjimap.com/${encodeURIComponent(k)}` },
+  mojinavi: { label: "Mojinavi", url: (k) => `https://mojinavi.com/d/u${k.codePointAt(0).toString(16)}` },
 };
 
 const KANJI_FONTS = {
@@ -216,6 +217,18 @@ function jumpToNextUnknown() {
     }
   }
   showToast("All kanji are known!");
+}
+
+function toggleDropdown(id) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  const wasOpen = el.classList.contains("open");
+  closeAllDropdowns();
+  if (!wasOpen) el.classList.add("open");
+}
+
+function closeAllDropdowns() {
+  document.querySelectorAll(".split-dropdown.open").forEach((d) => d.classList.remove("open"));
 }
 
 function showToast(message) {
@@ -441,10 +454,29 @@ function renderActions(isKnown, showSrsButtons) {
 }
 
 function renderLinkButtons(isKnown) {
+  const strokeSites = Object.entries(STROKE_ORDER_SITES).map(([key, site]) =>
+    `<button class="dropdown-item ${state.strokeOrderSite === key ? "active" : ""}" data-action="quick-stroke" data-site="${key}">${site.label}</button>`
+  ).join("");
+  const lookUpSites = Object.entries(LOOKUP_SITES).map(([key, site]) =>
+    `<button class="dropdown-item ${state.lookUpSite === key ? "active" : ""}" data-action="quick-lookup" data-site="${key}">${site.label}</button>`
+  ).join("");
+
   return `
     <div class="row">
-      <button class="btn secondary" data-action="stroke-order">Stroke Order</button>
-      <button class="btn secondary" data-action="look-up">Look Up</button>
+      <div class="split-btn">
+        <button class="btn secondary split-main" data-action="stroke-order">Stroke Order</button>
+        <button class="btn secondary split-arrow" data-action="toggle-stroke-dropdown">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M6 9l6 6 6-6"/></svg>
+        </button>
+        <div class="split-dropdown" id="strokeDropdown">${strokeSites}</div>
+      </div>
+      <div class="split-btn">
+        <button class="btn secondary split-main" data-action="look-up">Look Up</button>
+        <button class="btn secondary split-arrow" data-action="toggle-lookup-dropdown">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M6 9l6 6 6-6"/></svg>
+        </button>
+        <div class="split-dropdown" id="lookupDropdown">${lookUpSites}</div>
+      </div>
     </div>
     <div class="row single">
       <button class="btn ${isKnown ? "known" : "primary"}" data-action="toggle-known">
@@ -1078,6 +1110,11 @@ document.addEventListener("click", (e) => {
     if (!action) return; // block propagation by not matching any action
   }
 
+  // Close dropdowns on any click outside dropdown toggles
+  if (!e.target.closest(".split-arrow") && !e.target.closest(".split-dropdown")) {
+    closeAllDropdowns();
+  }
+
   const target = e.target.closest("[data-action]");
   if (!target) return;
   const action = target.dataset.action;
@@ -1098,6 +1135,24 @@ document.addEventListener("click", (e) => {
       break;
     case "stroke-order": openStrokeOrder(); break;
     case "look-up": openLookUp(); break;
+    case "toggle-stroke-dropdown": toggleDropdown("strokeDropdown"); break;
+    case "toggle-lookup-dropdown": toggleDropdown("lookupDropdown"); break;
+    case "quick-stroke": {
+      state.strokeOrderSite = target.dataset.site;
+      saveSitePrefs();
+      closeAllDropdowns();
+      render();
+      showToast(`Stroke Order → ${STROKE_ORDER_SITES[state.strokeOrderSite].label}`);
+      break;
+    }
+    case "quick-lookup": {
+      state.lookUpSite = target.dataset.site;
+      saveSitePrefs();
+      closeAllDropdowns();
+      render();
+      showToast(`Look Up → ${LOOKUP_SITES[state.lookUpSite].label}`);
+      break;
+    }
     case "undo": undoLastAction(); break;
     case "jump-unknown": jumpToNextUnknown(); break;
     case "toggle-dark":
@@ -1207,6 +1262,7 @@ document.addEventListener("input", (e) => {
 
 document.addEventListener("keydown", (e) => {
   if (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA") return;
+  if (e.ctrlKey || e.metaKey || e.altKey) return;
 
   if (state.activeView) {
     if (e.key === "Escape") closeView();

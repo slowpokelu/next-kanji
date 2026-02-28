@@ -1094,6 +1094,20 @@ input, select {
   color: var(--text-quaternary);
 }
 
+.settings-footer-title {
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.settings-footer-links a {
+  color: var(--text-tertiary);
+  text-decoration: none;
+}
+
+.settings-footer-links a:hover {
+  color: var(--accent);
+}
+
 /* ========================================
    Toast
    ======================================== */

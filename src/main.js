@@ -332,7 +332,7 @@ function renderHeader(progress, total, pct) {
   return `
     <header class="header">
       <button class="header-title" data-action="jump-unknown" title="Jump to next unknown">
-        漢字練習
+        漢字書く練習
         <span class="header-count">${progress}<span class="dim">/${total}</span> <span class="header-pct">${pct}%</span></span>
       </button>
       <div class="header-right">
@@ -698,7 +698,14 @@ function renderSettings() {
           </div>
         </div>
 
-        <div class="settings-footer">漢字練習 v3</div>
+        <div class="settings-footer">
+          <div class="settings-footer-title">漢字書く練習</div>
+          <div class="settings-footer-links">
+            made by <a href="https://github.com/slowpokelu" target="_blank" rel="noopener">slowpokelu</a>
+            ·
+            <a href="https://ko-fi.com/slowpokelu/tip" target="_blank" rel="noopener">support me ♡</a>
+          </div>
+        </div>
       </div>
     </div>
   `;

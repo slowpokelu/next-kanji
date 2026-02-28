@@ -29,7 +29,7 @@ const state = {
 
 const STROKE_ORDER_SITES = {
   jisho: { label: "Jisho", url: (k) => `https://jisho.org/search/${k}%20%23kanji` },
-  kakijun: { label: "Kakijun", url: (k) => `https://kakijun.jp/page/${encodeURIComponent(k)}.html` },
+  strokeorder: { label: "Stroke Order Navi", url: (k) => `https://kanji-stroke-order.com/kanji/u${k.codePointAt(0).toString(16)}` },
   kanjialive: { label: "Kanji Alive", url: (k) => `https://app.kanjialive.com/${encodeURIComponent(k)}` },
 };
 

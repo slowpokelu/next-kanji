@@ -54,7 +54,8 @@ const KANJI_FONTS = {
    ======================================== */
 
 async function loadKanjiData() {
-  const res = await fetch("/kanji_sorted.json");
+  const base = import.meta.env.BASE_URL || "/";
+  const res = await fetch(`${base}kanji_sorted.json`);
   const data = await res.json();
   state.kanjiData = data.sort((a, b) => {
     if (a.Frequency === 0 && b.Frequency === 0) return 0;

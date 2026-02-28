@@ -176,6 +176,11 @@ input, select {
   font-weight: 500;
 }
 
+.header-pct {
+  color: var(--accent);
+  font-weight: 600;
+}
+
 .header-right {
   display: flex;
   gap: 2px;
@@ -377,6 +382,7 @@ input, select {
 }
 
 .tab {
+  position: relative;
   flex: 1;
   max-width: 120px;
   display: flex;
@@ -401,6 +407,25 @@ input, select {
 .tab svg {
   width: 22px;
   height: 22px;
+}
+
+.tab-badge {
+  position: absolute;
+  top: 2px;
+  right: 50%;
+  transform: translateX(14px);
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 100px;
+  background: var(--warning);
+  color: white;
+  font-size: 0.5625rem;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
 }
 
 /* ========================================

@@ -302,7 +302,7 @@ function render() {
     (state.mode === "recall" && state.recallRevealed);
 
   app.innerHTML = `
-    ${renderHeader(progress, total, pct, dueCount)}
+    ${renderHeader(progress, total, pct)}
     <div class="progress-track"><div class="progress-fill" style="width: ${pct}%"></div></div>
 
     <div class="kanji-display" key="${state.currentIndex}">
@@ -328,12 +328,12 @@ function render() {
   renderTabBar();
 }
 
-function renderHeader(progress, total, pct, dueCount) {
+function renderHeader(progress, total, pct) {
   return `
     <header class="header">
       <button class="header-title" data-action="jump-unknown" title="Jump to next unknown">
         漢字練習
-        <span class="header-count">${progress}<span class="dim">/${total}</span></span>
+        <span class="header-count">${progress}<span class="dim">/${total}</span> <span class="header-pct">${pct}%</span></span>
       </button>
       <div class="header-right">
         <button class="header-btn" data-action="toggle-dark" title="Toggle dark mode">
@@ -343,7 +343,6 @@ function renderHeader(progress, total, pct, dueCount) {
           }
         </button>
         <button class="header-btn" data-action="explorer" title="Explorer">
-          ${dueCount > 0 ? `<span class="badge">${dueCount > 99 ? "99+" : dueCount}</span>` : ""}
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
         </button>
         <button class="header-btn" data-action="settings" title="Settings">
@@ -380,8 +379,11 @@ function renderTabBar() {
     { id: "recall", label: "Recall", icon: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>' },
   ];
 
+  const dueCount = getDueCount(state.kanjiData, state.knownSet, state.srsData);
+
   el.innerHTML = modes.map((m) =>
     `<button class="tab ${state.mode === m.id ? "active" : ""}" data-action="mode-${m.id}">
+      ${m.id === "review" && dueCount > 0 ? `<span class="tab-badge">${dueCount > 99 ? "99+" : dueCount}</span>` : ""}
       ${m.icon}
       <span>${m.label}</span>
     </button>`
@@ -804,9 +806,9 @@ function nextKanji() {
 }
 
 function prevKanji() {
+  if (state.currentIndex === 0) return;
   state.recallRevealed = false;
-  state.currentIndex =
-    (state.currentIndex - 1 + state.kanjiData.length) % state.kanjiData.length;
+  state.currentIndex--;
   saveIndex();
   render();
 }

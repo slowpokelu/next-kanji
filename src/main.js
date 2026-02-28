@@ -48,7 +48,14 @@ const KANJI_FONTS = {
   zenmarugothic: { label: "Zen Maru Gothic", family: "Zen Maru Gothic" },
   shippori: { label: "Shippori Mincho", family: "Shippori Mincho" },
   kleeone: { label: "Klee One", family: "Klee One" },
+  yomogi: { label: "Yomogi", family: "Yomogi" },
+  yuseimagic: { label: "Yusei Magic", family: "Yusei Magic" },
+  hinamincho: { label: "Hina Mincho", family: "Hina Mincho" },
+  kaiseidecol: { label: "Kaisei Decol", family: "Kaisei Decol" },
+  dotgothic: { label: "DotGothic16", family: "DotGothic16" },
+  reggaeone: { label: "Reggae One", family: "Reggae One" },
 };
+const FONT_KEYS = Object.keys(KANJI_FONTS);
 
 /* ========================================
    Data
@@ -307,7 +314,12 @@ function render() {
 
     <div class="kanji-display" key="${state.currentIndex}">
       <div class="${charClass}">${kanjiDisplay}</div>
-      <div class="known-indicator${isKnown ? "" : " hidden"}">Known</div>
+      <div class="kanji-sub-row">
+        <div class="known-indicator${isKnown ? "" : " hidden"}">Known</div>
+        <button class="font-cycle-btn" data-action="cycle-font" title="${KANJI_FONTS[state.kanjiFont].label}">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><text x="3" y="17" font-size="14" font-weight="bold" fill="currentColor" stroke="none">A</text><text x="14" y="17" font-size="10" fill="currentColor" stroke="none">a</text></svg>
+        </button>
+      </div>
     </div>
 
     <div class="readings-area">
@@ -1164,6 +1176,18 @@ document.addEventListener("click", (e) => {
     }
     case "undo": undoLastAction(); break;
     case "jump-unknown": jumpToNextUnknown(); break;
+    case "cycle-font": {
+      const idx = FONT_KEYS.indexOf(state.kanjiFont);
+      const nextIdx = (idx + 1) % FONT_KEYS.length;
+      state.kanjiFont = FONT_KEYS[nextIdx];
+      applyKanjiFont(state.kanjiFont);
+      saveFont();
+      showToast(KANJI_FONTS[state.kanjiFont].label);
+      // Update the button title without full re-render
+      const btn = document.querySelector('.font-cycle-btn');
+      if (btn) btn.title = KANJI_FONTS[state.kanjiFont].label;
+      break;
+    }
     case "toggle-dark":
       state.darkMode = !state.darkMode;
       document.documentElement.setAttribute("data-theme", state.darkMode ? "dark" : "");

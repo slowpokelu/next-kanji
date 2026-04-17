@@ -316,6 +316,10 @@ a { color: var(--accent); }
   justify-content: center;
 }
 
+.kanji-char[data-action] {
+  cursor: pointer;
+}
+
 .kanji-char.hidden {
   opacity: 0.12;
   font-size: 6.5rem;

@@ -21,6 +21,7 @@ const state = {
   strokeOrderSite: "kanjialive",
   lookUpSite: "jisho",
   kanjiFont: "kleeone",
+  showFontCycleBtn: false,
   strokeOrderModal: null, // { kanji, svg?, loading, error? }
 };
 
@@ -137,6 +138,9 @@ function loadState() {
     if (kanjiFont && KANJI_FONTS[kanjiFont]) {
       state.kanjiFont = kanjiFont;
     }
+
+    const showFontCycle = localStorage.getItem("nk3_showFontCycleBtn");
+    if (showFontCycle === "1") state.showFontCycleBtn = true;
   } catch {
     // ignore corrupt data
   }
@@ -166,6 +170,10 @@ function saveSitePrefs() {
 
 function saveFont() {
   localStorage.setItem("nk3_kanjiFont", state.kanjiFont);
+}
+
+function saveFontCycleVisibility() {
+  localStorage.setItem("nk3_showFontCycleBtn", state.showFontCycleBtn ? "1" : "0");
 }
 
 function applyKanjiFont(key) {
@@ -349,9 +357,9 @@ function render() {
       <div class="${charClass}"${shouldHide ? "" : ' data-action="stroke-order" title="Stroke order"'}>${kanjiDisplay}</div>
       <div class="kanji-sub-row">
         <div class="known-indicator${isKnown ? "" : " hidden"}">Known</div>
-        <button class="font-cycle-btn" data-action="cycle-font" title="${KANJI_FONTS[state.kanjiFont].label}">
+        ${state.showFontCycleBtn ? `<button class="font-cycle-btn" data-action="cycle-font" title="${KANJI_FONTS[state.kanjiFont].label}">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><text x="3" y="17" font-size="14" font-weight="bold" fill="currentColor" stroke="none">A</text><text x="14" y="17" font-size="10" fill="currentColor" stroke="none">a</text></svg>
-        </button>
+        </button>` : ""}
       </div>
     </div>
 
@@ -663,6 +671,10 @@ function renderSettingsBody() {
           <div class="font-preview" style="${state.kanjiFont !== "system" && KANJI_FONTS[state.kanjiFont]?.family ? `font-family: &quot;${KANJI_FONTS[state.kanjiFont].family}&quot;` : ""}">
             <span class="font-preview-chars">永遠夢光風</span>
           </div>
+          <button class="group-row clickable" data-action="toggle-font-cycle-btn">
+            <span class="group-row-label">Font Cycle Button</span>
+            <span class="group-row-hint">${state.showFontCycleBtn ? "Shown" : "Hidden"}</span>
+          </button>
         </div>
 
         <div class="section-label">External Links</div>
@@ -1484,6 +1496,12 @@ document.addEventListener("click", (e) => {
       if (state.confirmDialog?.onConfirm) state.confirmDialog.onConfirm();
       state.confirmDialog = null;
       renderConfirm();
+      break;
+    case "toggle-font-cycle-btn":
+      state.showFontCycleBtn = !state.showFontCycleBtn;
+      saveFontCycleVisibility();
+      renderView();
+      render();
       break;
 
     // Mode buttons

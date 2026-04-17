@@ -346,7 +346,7 @@ function render() {
     <div class="progress-track"><div class="progress-fill" style="width: ${pct}%"></div></div>
 
     <div class="kanji-display" key="${state.currentIndex}">
-      <div class="${charClass}">${kanjiDisplay}</div>
+      <div class="${charClass}"${shouldHide ? "" : ' data-action="stroke-order" title="Stroke order"'}>${kanjiDisplay}</div>
       <div class="kanji-sub-row">
         <div class="known-indicator${isKnown ? "" : " hidden"}">Known</div>
         <button class="font-cycle-btn" data-action="cycle-font" title="${KANJI_FONTS[state.kanjiFont].label}">
@@ -381,6 +381,9 @@ function renderHeader(progress, total, pct) {
         <span class="header-count">${progress}<span class="dim">/${total}</span> <span class="header-pct">${pct}%</span></span>
       </button>
       <div class="header-right">
+        <button class="header-btn" data-action="jump-unknown" title="Jump to next unknown">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 4 15 12 5 20"/><line x1="19" y1="5" x2="19" y2="19"/></svg>
+        </button>
         <button class="header-btn" data-action="toggle-dark" title="Toggle dark mode">
           ${state.darkMode
             ? '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>'

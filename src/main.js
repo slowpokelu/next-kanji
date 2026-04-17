@@ -1,5 +1,5 @@
 import "./style.css";
-import { createSrsEntry, reviewCard, isDue, getDueCount, formatInterval } from "./srs.js";
+import { createSrsEntry, reviewCard, isDue, getDueCount, formatInterval, migrateSrsData } from "./srs.js";
 
 /* ========================================
    State
@@ -20,8 +20,34 @@ const state = {
   confirmDialog: null,
   strokeOrderSite: "kanjialive",
   lookUpSite: "jisho",
-  kanjiFont: "system",
+  kanjiFont: "kleeone",
+  strokeOrderModal: null, // { kanji, svg?, loading, error? }
 };
+
+/* ========================================
+   KanjiVG (in-app stroke order)
+   ======================================== */
+
+const KANJIVG_BASE = "https://cdn.jsdelivr.net/gh/KanjiVG/kanjivg@master/kanji";
+const kanjiSvgCache = {};
+
+async function fetchKanjiVG(kanji) {
+  const code = kanji.codePointAt(0).toString(16).padStart(5, "0");
+  if (kanjiSvgCache[code] !== undefined) return kanjiSvgCache[code];
+  try {
+    const res = await fetch(`${KANJIVG_BASE}/${code}.svg`);
+    if (!res.ok) {
+      kanjiSvgCache[code] = null;
+      return null;
+    }
+    const text = await res.text();
+    kanjiSvgCache[code] = text;
+    return text;
+  } catch {
+    kanjiSvgCache[code] = null;
+    return null;
+  }
+}
 
 /* ========================================
    External Link Config
@@ -83,7 +109,14 @@ function loadState() {
     if (known) state.knownSet = new Set(JSON.parse(known));
 
     const srs = localStorage.getItem("nk3_srs");
-    if (srs) state.srsData = JSON.parse(srs);
+    if (srs) {
+      const parsed = JSON.parse(srs);
+      const { data, changed } = migrateSrsData(parsed);
+      state.srsData = data;
+      if (changed) {
+        localStorage.setItem("nk3_srs", JSON.stringify(state.srsData));
+      }
+    }
 
     const theme = localStorage.getItem("nk3_theme");
     if (theme === "dark") {
@@ -103,11 +136,11 @@ function loadState() {
     const kanjiFont = localStorage.getItem("nk3_kanjiFont");
     if (kanjiFont && KANJI_FONTS[kanjiFont]) {
       state.kanjiFont = kanjiFont;
-      applyKanjiFont(kanjiFont);
     }
   } catch {
     // ignore corrupt data
   }
+  applyKanjiFont(state.kanjiFont);
 }
 
 function saveKnown() {
@@ -468,22 +501,13 @@ function renderActions(isKnown, showSrsButtons) {
 }
 
 function renderLinkButtons(isKnown) {
-  const strokeSites = Object.entries(STROKE_ORDER_SITES).map(([key, site]) =>
-    `<button class="dropdown-item ${state.strokeOrderSite === key ? "active" : ""}" data-action="quick-stroke" data-site="${key}">${site.label}</button>`
-  ).join("");
   const lookUpSites = Object.entries(LOOKUP_SITES).map(([key, site]) =>
     `<button class="dropdown-item ${state.lookUpSite === key ? "active" : ""}" data-action="quick-lookup" data-site="${key}">${site.label}</button>`
   ).join("");
 
   return `
     <div class="row">
-      <div class="split-btn">
-        <button class="btn secondary split-main" data-action="stroke-order">Stroke Order</button>
-        <button class="btn secondary split-arrow" data-action="toggle-stroke-dropdown">
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M6 9l6 6 6-6"/></svg>
-        </button>
-        <div class="split-dropdown" id="strokeDropdown">${strokeSites}</div>
-      </div>
+      <button class="btn secondary" data-action="stroke-order">Stroke Order</button>
       <div class="split-btn">
         <button class="btn secondary split-main" data-action="look-up">Look Up</button>
         <button class="btn secondary split-arrow" data-action="toggle-lookup-dropdown">
@@ -504,33 +528,48 @@ function renderLinkButtons(isKnown) {
    Rendering - Explorer View
    ======================================== */
 
-function renderExplorer() {
-  const filtered = state.kanjiData.filter((k) => {
-    if (state.explorerFilter === "known") return state.knownSet.has(k.Kanji);
-    if (state.explorerFilter === "unknown") return !state.knownSet.has(k.Kanji);
-    if (state.explorerFilter === "due")
-      return state.knownSet.has(k.Kanji) && isDue(state.srsData[k.Kanji]);
-    return true;
-  });
-
+function renderExplorerBody() {
+  const filter = state.explorerFilter;
   const knownCount = state.knownSet.size;
   const unknownCount = state.kanjiData.length - knownCount;
   const dueCount = getDueCount(state.kanjiData, state.knownSet, state.srsData);
 
-  const grid = filtered.length > 0
-    ? filtered.map((k) => {
-        const idx = state.kanjiData.indexOf(k);
-        const isKnown = state.knownSet.has(k.Kanji);
-        const isCurrent = idx === state.currentIndex;
-        const isItemDue = isKnown && isDue(state.srsData[k.Kanji]);
-        let cls = "cell";
-        if (isKnown) cls += " known";
-        if (isCurrent) cls += " current";
-        if (isItemDue) cls += " due";
-        return `<div class="${cls}" data-action="explorer-select" data-index="${idx}">${k.Kanji}</div>`;
-      }).join("")
+  let matchCount = 0;
+  const cells = state.kanjiData.map((k, idx) => {
+    const isKnown = state.knownSet.has(k.Kanji);
+    const isItemDue = isKnown && isDue(state.srsData[k.Kanji]);
+    if (filter === "known" && !isKnown) return "";
+    if (filter === "unknown" && isKnown) return "";
+    if (filter === "due" && !isItemDue) return "";
+    matchCount++;
+    const isCurrent = idx === state.currentIndex;
+    let cls = "cell";
+    if (isKnown) cls += " known";
+    if (isCurrent) cls += " current";
+    if (isItemDue) cls += " due";
+    return `<div class="${cls}" data-action="explorer-select" data-index="${idx}">${k.Kanji}</div>`;
+  }).join("");
+
+  const grid = matchCount > 0
+    ? cells
     : `<div class="empty-state">No kanji match this filter</div>`;
 
+  return `
+    <div class="search-box">
+      <input type="text" id="explorerSearch" class="search-input"
+        placeholder="Type a kanji to jump..." maxlength="1" autocomplete="off" />
+    </div>
+    <div class="chip-row">
+      <button class="chip ${state.explorerFilter === "all" ? "active" : ""}" data-action="filter-all">All (${state.kanjiData.length})</button>
+      <button class="chip ${state.explorerFilter === "unknown" ? "active" : ""}" data-action="filter-unknown">Unknown (${unknownCount})</button>
+      <button class="chip ${state.explorerFilter === "known" ? "active" : ""}" data-action="filter-known">Known (${knownCount})</button>
+      <button class="chip ${state.explorerFilter === "due" ? "active" : ""}" data-action="filter-due">Due (${dueCount})</button>
+    </div>
+    <div class="kanji-grid">${grid}</div>
+  `;
+}
+
+function renderExplorer() {
   return `
     <div class="view" data-view="explorer">
       <div class="view-nav">
@@ -542,17 +581,7 @@ function renderExplorer() {
         <span class="view-title-spacer"></span>
       </div>
       <div class="view-body">
-        <div class="search-box">
-          <input type="text" id="explorerSearch" class="search-input"
-            placeholder="Type a kanji to jump..." maxlength="1" autocomplete="off" />
-        </div>
-        <div class="chip-row">
-          <button class="chip ${state.explorerFilter === "all" ? "active" : ""}" data-action="filter-all">All (${state.kanjiData.length})</button>
-          <button class="chip ${state.explorerFilter === "unknown" ? "active" : ""}" data-action="filter-unknown">Unknown (${unknownCount})</button>
-          <button class="chip ${state.explorerFilter === "known" ? "active" : ""}" data-action="filter-known">Known (${knownCount})</button>
-          <button class="chip ${state.explorerFilter === "due" ? "active" : ""}" data-action="filter-due">Due (${dueCount})</button>
-        </div>
-        <div class="kanji-grid">${grid}</div>
+        ${renderExplorerBody()}
       </div>
     </div>
   `;
@@ -562,17 +591,28 @@ function renderExplorer() {
    Rendering - Settings View
    ======================================== */
 
-function renderSettings() {
+function renderSettingsBody() {
   const total = state.kanjiData.length;
   const known = state.knownSet.size;
   const unknown = total - known;
   const dueCount = getDueCount(state.kanjiData, state.knownSet, state.srsData);
   const pct = total > 0 ? ((known / total) * 100).toFixed(1) : "0.0";
 
-  const easeValues = Object.values(state.srsData).map((e) => e.easeFactor);
-  const avgEase = easeValues.length > 0
-    ? (easeValues.reduce((a, b) => a + b, 0) / easeValues.length).toFixed(2)
-    : "—";
+  const stabilityValues = Object.values(state.srsData)
+    .filter((e) => e && typeof e.stability === "number" && e.stability > 0)
+    .map((e) => e.stability);
+  const avgStability = stabilityValues.length > 0
+    ? stabilityValues.reduce((a, b) => a + b, 0) / stabilityValues.length
+    : null;
+  const avgStabilityLabel = avgStability === null
+    ? "—"
+    : avgStability < 1
+      ? `${Math.round(avgStability * 24)}h`
+      : avgStability < 30
+        ? `${avgStability.toFixed(1)}d`
+        : avgStability < 365
+          ? `${Math.round(avgStability / 30)}mo`
+          : `${(avgStability / 365).toFixed(1)}y`;
 
   // Build site option HTML
   const strokeOptions = Object.entries(STROKE_ORDER_SITES).map(([key, site]) =>
@@ -588,16 +628,6 @@ function renderSettings() {
   ).join("");
 
   return `
-    <div class="view" data-view="settings">
-      <div class="view-nav">
-        <button class="back-btn" data-action="close-view">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
-          Back
-        </button>
-        <span class="view-title">Settings</span>
-        <span class="view-title-spacer"></span>
-      </div>
-      <div class="view-body">
 
         <div class="section-label">Statistics</div>
         <div class="group">
@@ -615,8 +645,8 @@ function renderSettings() {
               <div class="stat-desc">Due</div>
             </div>
             <div class="stat">
-              <div class="stat-num">${avgEase}</div>
-              <div class="stat-desc">Avg. Ease</div>
+              <div class="stat-num">${avgStabilityLabel}</div>
+              <div class="stat-desc">Avg. Stability</div>
             </div>
           </div>
         </div>
@@ -718,6 +748,22 @@ function renderSettings() {
             <a href="https://ko-fi.com/slowpokelu/tip" target="_blank" rel="noopener">support me ♡</a>
           </div>
         </div>
+  `;
+}
+
+function renderSettings() {
+  return `
+    <div class="view" data-view="settings">
+      <div class="view-nav">
+        <button class="back-btn" data-action="close-view">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
+          Back
+        </button>
+        <span class="view-title">Settings</span>
+        <span class="view-title-spacer"></span>
+      </div>
+      <div class="view-body">
+        ${renderSettingsBody()}
       </div>
     </div>
   `;
@@ -735,21 +781,45 @@ function renderView() {
     document.body.appendChild(el);
   }
 
-  if (state.activeView === "explorer") {
-    el.innerHTML = renderExplorer();
-    el.classList.add("open");
-    requestAnimationFrame(() => {
-      el.querySelector(".view")?.classList.add("entering");
-    });
-  } else if (state.activeView === "settings") {
-    el.innerHTML = renderSettings();
-    el.classList.add("open");
-    requestAnimationFrame(() => {
-      el.querySelector(".view")?.classList.add("entering");
-    });
-  } else {
+  if (!state.activeView) {
     el.classList.remove("open");
     el.innerHTML = "";
+    el.dataset.rendered = "";
+    return;
+  }
+
+  const isFullRender = el.dataset.rendered !== state.activeView;
+
+  if (isFullRender) {
+    el.dataset.rendered = state.activeView;
+    if (state.activeView === "explorer") {
+      el.innerHTML = renderExplorer();
+      // Scroll current kanji into view (while view is still off-screen)
+      requestAnimationFrame(() => {
+        const viewBody = el.querySelector(".view-body");
+        const current = el.querySelector(".cell.current");
+        if (viewBody && current) {
+          const target = current.offsetTop - (viewBody.clientHeight - current.clientHeight) / 2;
+          viewBody.scrollTop = Math.max(0, target);
+        }
+      });
+    } else if (state.activeView === "settings") {
+      el.innerHTML = renderSettings();
+    }
+    el.classList.add("open");
+    requestAnimationFrame(() => {
+      el.querySelector(".view")?.classList.add("entering");
+    });
+    return;
+  }
+
+  // Same view already open — update body only, no re-animation
+  const body = el.querySelector(".view-body");
+  if (!body) return;
+  if (state.activeView === "explorer") {
+    body.innerHTML = renderExplorerBody();
+  } else if (state.activeView === "settings") {
+    body.innerHTML = renderSettingsBody();
   }
 }
 
@@ -929,15 +999,203 @@ function toggleDarkMode() {
   saveTheme();
   // Update meta theme-color
   const meta = document.querySelector('meta[name="theme-color"]');
-  if (meta) meta.content = state.darkMode ? "#000000" : "#F2F2F7";
+  if (meta) meta.content = state.darkMode ? "#0F0A06" : "#F4EFE6";
   render();
   if (state.activeView) renderView();
 }
 
 function openStrokeOrder() {
   const kanji = getCurrentKanji();
+  showStrokeOrder(kanji.Kanji);
+}
+
+function openStrokeOrderExternal() {
+  const kanji = getCurrentKanji();
   const site = STROKE_ORDER_SITES[state.strokeOrderSite] || STROKE_ORDER_SITES.jisho;
   window.open(site.url(kanji.Kanji), "_blank");
+}
+
+function getCachedKanjiVG(kanji) {
+  const code = kanji.codePointAt(0).toString(16).padStart(5, "0");
+  return kanjiSvgCache[code];
+}
+
+function showStrokeOrder(kanji) {
+  const cached = getCachedKanjiVG(kanji);
+
+  if (cached === null) {
+    // Known miss — skip the modal entirely, open external
+    openStrokeOrderExternal();
+    showToast("Stroke data unavailable — opening external");
+    return;
+  }
+
+  if (cached !== undefined) {
+    // Cache hit — skip the loading flash
+    state.strokeOrderModal = { kanji, svg: cached, loading: false };
+    renderStrokeOrder();
+    // Let the dialog entrance animation play (~200ms) before strokes start
+    setTimeout(animateStrokeOrder, 240);
+    return;
+  }
+
+  // Cache miss — show loading state while fetching
+  state.strokeOrderModal = { kanji, loading: true };
+  renderStrokeOrder();
+  fetchKanjiVG(kanji).then((svg) => {
+    if (state.strokeOrderModal?.kanji !== kanji) return; // user moved on
+    if (!svg) {
+      closeStrokeOrder();
+      openStrokeOrderExternal();
+      showToast("Stroke data unavailable — opening external");
+      return;
+    }
+    state.strokeOrderModal = { kanji, svg, loading: false };
+    renderStrokeOrder();
+    setTimeout(animateStrokeOrder, 120);
+  });
+}
+
+function closeStrokeOrder() {
+  const el = document.getElementById("strokeOverlay");
+  const dialog = el?.querySelector(".stroke-dialog");
+  if (dialog) {
+    dialog.classList.remove("entering");
+    dialog.classList.add("leaving");
+    el.querySelector(".stroke-canvas")?.classList.remove("animating");
+    setTimeout(() => {
+      state.strokeOrderModal = null;
+      renderStrokeOrder();
+    }, 180);
+  } else {
+    state.strokeOrderModal = null;
+    renderStrokeOrder();
+  }
+}
+
+function renderStrokeOrderShell() {
+  const externalLabel = STROKE_ORDER_SITES[state.strokeOrderSite]?.label || "External";
+  return `
+    <div class="stroke-overlay" data-action="stroke-close">
+      <div class="stroke-dialog" data-stop-propagation>
+        <div class="stroke-head">
+          <span class="stroke-title">Stroke Order</span>
+          <span class="stroke-kanji"></span>
+          <button class="stroke-close-btn" data-action="stroke-close" aria-label="Close">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
+          </button>
+        </div>
+        <div class="stroke-canvas"></div>
+        <div class="stroke-controls">
+          <button class="btn secondary" data-action="stroke-replay">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 4v6h6"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>
+            Replay
+          </button>
+          <button class="btn secondary" data-action="stroke-numbers">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16M4 12h16M4 18h7"/></svg>
+            Numbers
+          </button>
+          <button class="btn text" data-action="stroke-external">
+            Open in ${externalLabel} ↗
+          </button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function renderStrokeOrder() {
+  let el = document.getElementById("strokeOverlay");
+  if (!state.strokeOrderModal) {
+    if (el) el.remove();
+    return;
+  }
+
+  // First render: create shell and schedule entrance animation (once)
+  if (!el) {
+    el = document.createElement("div");
+    el.id = "strokeOverlay";
+    el.innerHTML = renderStrokeOrderShell();
+    document.body.appendChild(el);
+    requestAnimationFrame(() => {
+      el.querySelector(".stroke-dialog")?.classList.add("entering");
+    });
+  }
+
+  // Subsequent renders: update contents in-place, preserve dialog wrapper
+  const { kanji, svg, loading } = state.strokeOrderModal;
+
+  const titleKanji = el.querySelector(".stroke-kanji");
+  if (titleKanji) titleKanji.textContent = kanji;
+
+  const canvas = el.querySelector(".stroke-canvas");
+  if (canvas) {
+    canvas.classList.remove("animating", "show-numbers");
+    canvas.classList.toggle("is-loading", !!loading);
+    canvas.innerHTML = loading ? '<div class="loading-spinner"></div>' : sanitizeKanjiVGSvg(svg);
+  }
+
+  const replayBtn = el.querySelector('[data-action="stroke-replay"]');
+  const numbersBtn = el.querySelector('[data-action="stroke-numbers"]');
+  if (replayBtn) replayBtn.disabled = !!loading;
+  if (numbersBtn) numbersBtn.disabled = !!loading;
+}
+
+function sanitizeKanjiVGSvg(raw) {
+  let svg = raw;
+  // Remove XML prolog and DOCTYPE (incl. internal subset) — leaks as text when innerHTML'd
+  svg = svg.replace(/<\?xml[\s\S]*?\?>/g, "");
+  svg = svg.replace(/<!DOCTYPE[\s\S]*?\]\s*>/g, "");
+  svg = svg.replace(/<!DOCTYPE[\s\S]*?>/g, "");
+  // Strip inline fill/stroke so CSS (currentColor) can control it
+  svg = svg
+    .replace(/style="[^"]*fill:[^"]*#000000[^"]*"/gi, "")
+    .replace(/fill="#000000"/gi, "")
+    .replace(/fill="#808080"/gi, "");
+  // Tag the stroke numbers group so CSS can hide/show it
+  svg = svg.replace(/id="kvg:StrokeNumbers_[^"]+"/, (m) => `${m} data-role="stroke-numbers"`);
+  // Tag the stroke paths group so CSS hides it until animateStrokeOrder reveals it
+  svg = svg.replace(/id="kvg:StrokePaths_[^"]+"/, (m) => `${m} data-role="stroke-paths"`);
+  return svg.trim();
+}
+
+function animateStrokeOrder() {
+  const container = document.querySelector(".stroke-canvas");
+  if (!container) return;
+  const paths = container.querySelectorAll('g[id*="StrokePaths"] path[d]');
+  if (paths.length === 0) return;
+
+  // Phase 1: compute real stroke lengths and set dashoffset=length (fully hidden).
+  // The paths group is still visibility:hidden via CSS at this point, so no flash.
+  paths.forEach((p) => {
+    const length = p.getTotalLength();
+    p.style.transition = "none";
+    p.style.strokeDasharray = length;
+    p.style.strokeDashoffset = length;
+  });
+  void container.offsetWidth;
+  // Reveal — paths are now visible but still drawn-invisible due to dashoffset
+  container.classList.add("animating");
+
+  // Phase 2: stagger-animate each stroke to dashoffset 0
+  requestAnimationFrame(() => {
+    const duration = 420;
+    const gap = 80;
+    let delay = 0;
+    paths.forEach((p) => {
+      setTimeout(() => {
+        p.style.transition = `stroke-dashoffset ${duration}ms cubic-bezier(0.4,0,0.2,1)`;
+        p.style.strokeDashoffset = "0";
+      }, delay);
+      delay += duration + gap;
+    });
+  });
+}
+
+function toggleStrokeNumbers() {
+  const container = document.querySelector(".stroke-canvas");
+  if (!container) return;
+  container.classList.toggle("show-numbers");
 }
 
 function openLookUp() {
@@ -1155,17 +1413,15 @@ document.addEventListener("click", (e) => {
       render();
       break;
     case "stroke-order": openStrokeOrder(); break;
-    case "look-up": openLookUp(); break;
-    case "toggle-stroke-dropdown": toggleDropdown("strokeDropdown"); break;
-    case "toggle-lookup-dropdown": toggleDropdown("lookupDropdown"); break;
-    case "quick-stroke": {
-      state.strokeOrderSite = target.dataset.site;
-      saveSitePrefs();
-      closeAllDropdowns();
-      render();
-      showToast(`Stroke Order → ${STROKE_ORDER_SITES[state.strokeOrderSite].label}`);
+    case "stroke-close": closeStrokeOrder(); break;
+    case "stroke-replay": animateStrokeOrder(); break;
+    case "stroke-numbers": toggleStrokeNumbers(); break;
+    case "stroke-external":
+      closeStrokeOrder();
+      openStrokeOrderExternal();
       break;
-    }
+    case "look-up": openLookUp(); break;
+    case "toggle-lookup-dropdown": toggleDropdown("lookupDropdown"); break;
     case "quick-lookup": {
       state.lookUpSite = target.dataset.site;
       saveSitePrefs();
@@ -1297,6 +1553,10 @@ document.addEventListener("keydown", (e) => {
   if (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA") return;
   if (e.ctrlKey || e.metaKey || e.altKey) return;
 
+  if (state.strokeOrderModal) {
+    if (e.key === "Escape") closeStrokeOrder();
+    return;
+  }
   if (state.activeView) {
     if (e.key === "Escape") closeView();
     return;
@@ -1419,7 +1679,7 @@ async function init() {
 
   // Set initial theme-color
   const meta = document.querySelector('meta[name="theme-color"]');
-  if (meta) meta.content = state.darkMode ? "#000000" : "#F2F2F7";
+  if (meta) meta.content = state.darkMode ? "#0F0A06" : "#F4EFE6";
 
   render();
 }

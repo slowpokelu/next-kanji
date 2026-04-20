@@ -388,15 +388,19 @@ function toggleIgnore() {
     state.ignoredSet.delete(k.Kanji);
     saveIgnored();
     showToast(`復活 ${k.Kanji}`);
-  } else {
-    state.ignoredSet.add(k.Kanji);
-    saveIgnored();
-    showToast(`無視 ${k.Kanji}`);
-    // After ignoring, jump forward so user doesn't linger on an ignored kanji
-    nextKanji();
+    render();
     return;
   }
-  render();
+  showConfirm(
+    "無視",
+    `「${k.Kanji}」を無視しますか？`,
+    () => {
+      state.ignoredSet.add(k.Kanji);
+      saveIgnored();
+      showToast(`無視 ${k.Kanji}`);
+      nextKanji();
+    },
+  );
 }
 
 /* ========================================

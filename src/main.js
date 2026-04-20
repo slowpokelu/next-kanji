@@ -1,12 +1,4 @@
 import "./style.css";
-import {
-  createSrsEntry,
-  reviewCard,
-  isDue,
-  getDueCount,
-  formatInterval,
-  migrateSrsData,
-} from "./srs.js";
 import JA_GLOSS_DATA from "./ja_gloss.json";
 
 /* ========================================
@@ -18,7 +10,7 @@ const state = {
   currentIndex: 0,
   knownSet: new Set(),
   ignoredSet: new Set(),
-  mode: "study", // study | random | recall | review
+  mode: "study", // study | random | recall
   darkMode: true,
   accent: "vermilion", // vermilion | indigo | matcha | sumi
   verticalReadings: false,
@@ -27,7 +19,6 @@ const state = {
   activeView: null, // null | "explorer" | "settings"
   explorerFilter: "all",
   explorerQuery: "",
-  srsData: {},
   revealed: false,
   lastAction: null,
   confirmDialog: null,
@@ -101,7 +92,6 @@ const MODES = [
   { id: "study",  ja: "順", tag: "壱" },
   { id: "random", ja: "乱", tag: "弐" },
   { id: "recall", ja: "想", tag: "参" },
-  { id: "review", ja: "復", tag: "肆" },
 ];
 
 // JA gloss table — auto-generated from ja.wiktionary.org via scripts/fetch-ja-gloss.mjs.
@@ -135,14 +125,6 @@ function loadState() {
 
     const ignored = localStorage.getItem("nk3_ignored");
     if (ignored) state.ignoredSet = new Set(JSON.parse(ignored));
-
-    const srs = localStorage.getItem("nk3_srs");
-    if (srs) {
-      const parsed = JSON.parse(srs);
-      const { data, changed } = migrateSrsData(parsed);
-      state.srsData = data;
-      if (changed) localStorage.setItem("nk3_srs", JSON.stringify(state.srsData));
-    }
 
     const theme = localStorage.getItem("nk3_theme");
     if (theme === "light") state.darkMode = false;
@@ -185,7 +167,6 @@ function loadState() {
 
 function saveKnown() { localStorage.setItem("nk3_known", JSON.stringify([...state.knownSet])); }
 function saveIgnored() { localStorage.setItem("nk3_ignored", JSON.stringify([...state.ignoredSet])); }
-function saveSrs()   { localStorage.setItem("nk3_srs", JSON.stringify(state.srsData)); }
 function saveTheme() { localStorage.setItem("nk3_theme", state.darkMode ? "dark" : "light"); }
 function saveIndex() { localStorage.setItem("nk3_index", String(state.currentIndex)); }
 function saveMode()  { localStorage.setItem("nk3_mode", state.mode); }
@@ -315,12 +296,6 @@ function sanitizeKanjiVGSvg(raw) {
    ======================================== */
 
 function getCurrentKanji() { return state.kanjiData[state.currentIndex]; }
-
-function getDue() {
-  return state.kanjiData.filter(
-    (k) => state.knownSet.has(k.Kanji) && isDue(state.srsData[k.Kanji]),
-  );
-}
 
 function getMeaning(kanji) {
   if (!kanji) return "";
@@ -465,7 +440,6 @@ function render() {
   const total = state.kanjiData.length;
   const known = state.knownSet.size;
   const pct = total > 0 ? (known / total) * 100 : 0;
-  const dueCount = getDueCount(state.kanjiData, state.knownSet, state.srsData);
   const kanjiHidden =
     (state.mode === "recall" && !state.revealed) ||
     (state.hideKanji && !state.revealed);
@@ -473,14 +447,13 @@ function render() {
   // In hide-kanji mode, readings STAY visible (user recalls kanji from readings).
   const readingsHidden = state.hideReadings && state.mode !== "recall" && !state.revealed;
   const isKnown = state.knownSet.has(kanji.Kanji);
-  const srsEntry = state.srsData[kanji.Kanji];
 
   app.innerHTML = `
-    ${renderTopBar(known, total, dueCount)}
-    ${renderModeRail(dueCount)}
+    ${renderTopBar(known, total)}
+    ${renderModeRail()}
     <main class="main">
-      ${renderHero(kanji, kanjiHidden, isKnown, srsEntry, readingsHidden)}
-      ${renderSidePanel(kanji, kanjiHidden, isKnown, srsEntry, readingsHidden)}
+      ${renderHero(kanji, kanjiHidden, isKnown)}
+      ${renderSidePanel(kanji, kanjiHidden, isKnown, readingsHidden)}
     </main>
     ${renderBottomBar(kanji, known, total, pct, kanjiHidden)}
   `;
@@ -489,7 +462,7 @@ function render() {
   if (fill) fill.style.setProperty("--progress", `${pct}%`);
 }
 
-function renderTopBar(known, total, dueCount) {
+function renderTopBar(known, total) {
   const idx = state.currentIndex + 1;
   return `
     <header class="topbar">
@@ -517,19 +490,15 @@ function renderTopBar(known, total, dueCount) {
   `;
 }
 
-function renderModeRail(dueCount) {
+function renderModeRail() {
   return `
     <nav class="mode-rail">
       ${MODES.map((m) => {
         const active = state.mode === m.id;
-        const badge = m.id === "review" && dueCount > 0
-          ? `<span class="mode-btn-badge">${dueCount > 99 ? "99+" : dueCount}</span>`
-          : "";
         return `
           <button class="mode-btn ${active ? "active" : ""}" data-action="mode-${m.id}">
             <span class="mode-btn-ja">${m.ja}</span>
             <span class="mode-btn-tag">${m.tag}</span>
-            ${badge}
           </button>
         `;
       }).join("")}
@@ -537,11 +506,8 @@ function renderModeRail(dueCount) {
   `;
 }
 
-function renderHero(kanji, hidden, isKnown, srsEntry) {
+function renderHero(kanji, hidden, isKnown) {
   const freqStr = String(kanji.Frequency || 0).padStart(2, "0");
-  const srsLabel = srsEntry ? formatInterval(srsEntry) : null;
-  const fontLabel = KANJI_FONTS[state.kanjiFont]?.label || "";
-  const hasIgnored = state.ignoredSet.size > 0;
 
   return `
     <div class="hero">
@@ -551,12 +517,6 @@ function renderHero(kanji, hidden, isKnown, srsEntry) {
           <span class="hero-corner-label">頻度</span>
           <span class="hero-corner-num freq">#${kanji.Frequency || "—"}</span>
         </div>
-        ${srsLabel && (state.mode === "review" || state.mode === "recall") ? `
-          <div class="hero-srs">
-            <span class="hero-srs-label">期</span>
-            <span>${escapeHtml(srsLabel)}</span>
-          </div>
-        ` : ""}
       ` : ""}
 
       <div class="hero-chips top-left">
@@ -579,17 +539,8 @@ function renderHero(kanji, hidden, isKnown, srsEntry) {
   `;
 }
 
-function renderSidePanel(kanji, hidden, isKnown, srsEntry, readingsHidden) {
+function renderSidePanel(kanji, hidden, isKnown, readingsHidden) {
   const lookupSite = LOOKUP_SITES[state.lookUpSite];
-  // In review mode, don't show SRS buttons until readings are revealed
-  const showSrsButtons =
-    (state.mode === "review" && !readingsHidden) ||
-    (state.mode === "recall" && state.revealed);
-  // In hide-kanji mode, show SRS buttons only after reveal too
-  const showSrsButtons2 = showSrsButtons && !(state.hideKanji && !state.revealed && state.mode === "review");
-  // Readings stay visible in hide-kanji mode (that's the whole point).
-  // They hide only in recall mode (kanji hidden, meaning is the prompt) or hide-readings mode.
-  const readingsAreHidden = hidden && state.mode === "recall"; // i.e., recall-hidden only
   const meaningIsHidden = readingsHidden;
   const hideReadingsList = (hidden && state.mode === "recall") || readingsHidden;
   const isIgnored = state.ignoredSet.has(kanji.Kanji);
@@ -632,18 +583,16 @@ function renderSidePanel(kanji, hidden, isKnown, srsEntry, readingsHidden) {
             <span class="pbtn-sub">▷</span>
           </button>
         </div>
-        ${showSrsButtons ? renderSrsButtons(kanji, srsEntry) : `
-          <div class="side-actions-row">
-            <button class="pbtn" data-action="stroke-order">
-              <span class="pbtn-ja">筆順</span>
-              <span class="pbtn-sub">書き方</span>
-            </button>
-            <button class="pbtn ${isKnown ? "highlight" : "primary"}" data-action="toggle-known">
-              <span class="pbtn-ja">${isKnown ? "解除" : "習得"}</span>
-              <span class="pbtn-sub">${isKnown ? "取消" : "記憶"}</span>
-            </button>
-          </div>
-        `}
+        <div class="side-actions-row">
+          <button class="pbtn" data-action="stroke-order">
+            <span class="pbtn-ja">筆順</span>
+            <span class="pbtn-sub">書き方</span>
+          </button>
+          <button class="pbtn ${isKnown ? "highlight" : "primary"}" data-action="toggle-known">
+            <span class="pbtn-ja">${isKnown ? "解除" : "習得"}</span>
+            <span class="pbtn-sub">${isKnown ? "取消" : "記憶"}</span>
+          </button>
+        </div>
       </div>
     </aside>
   `;
@@ -663,34 +612,6 @@ function renderReadingCol(label, sub, readings, hidden) {
           ${readings.map((r) => `<span class="reading-item kanji">${escapeHtml(r)}</span>`).join("")}
         </div>
       `}
-    </div>
-  `;
-}
-
-function renderSrsButtons(kanji, entry) {
-  const base = entry || createSrsEntry();
-  const p1 = reviewCard(base, 1);
-  const p3 = reviewCard(base, 3);
-  const p4 = reviewCard(base, 4);
-  const p5 = reviewCard(base, 5);
-  return `
-    <div class="side-actions-row quad">
-      <button class="pbtn srs-again" data-action="srs-1">
-        <span class="pbtn-ja">再</span>
-        <span class="pbtn-sub">${escapeHtml(formatInterval(p1))}</span>
-      </button>
-      <button class="pbtn srs-hard" data-action="srs-3">
-        <span class="pbtn-ja">難</span>
-        <span class="pbtn-sub">${escapeHtml(formatInterval(p3))}</span>
-      </button>
-      <button class="pbtn srs-good" data-action="srs-4">
-        <span class="pbtn-ja">良</span>
-        <span class="pbtn-sub">${escapeHtml(formatInterval(p4))}</span>
-      </button>
-      <button class="pbtn srs-easy" data-action="srs-5">
-        <span class="pbtn-ja">易</span>
-        <span class="pbtn-sub">${escapeHtml(formatInterval(p5))}</span>
-      </button>
     </div>
   `;
 }
@@ -727,13 +648,11 @@ function renderExplorer() {
   const knownCount = state.knownSet.size;
   const ignoredCount = state.ignoredSet.size;
   const unknownCount = state.kanjiData.length - knownCount - ignoredCount;
-  const dueCount = getDueCount(state.kanjiData, state.knownSet, state.srsData);
 
   const FILTERS = [
     { id: "all", ja: "全", count: state.kanjiData.length },
     { id: "unknown", ja: "未", count: unknownCount },
     { id: "known", ja: "習", count: knownCount },
-    { id: "due", ja: "復", count: dueCount },
     { id: "ignored", ja: "無", count: ignoredCount },
   ];
 
@@ -776,14 +695,12 @@ function computeExplorerCellsArray() {
   const arr = [];
   state.kanjiData.forEach((k, idx) => {
     const isKnown = state.knownSet.has(k.Kanji);
-    const isItemDue = isKnown && isDue(state.srsData[k.Kanji]);
     const isIgnored = state.ignoredSet.has(k.Kanji);
     if (filter === "ignored" && !isIgnored) return;
     // Other filters exclude ignored kanji from the pool
     if (filter !== "all" && filter !== "ignored" && isIgnored) return;
     if (filter === "known" && !isKnown) return;
     if (filter === "unknown" && isKnown) return;
-    if (filter === "due" && !isItemDue) return;
     if (query) {
       if (
         !k.Kanji.includes(query) &&
@@ -796,7 +713,6 @@ function computeExplorerCellsArray() {
     let cls = "cell";
     if (isKnown) cls += " known";
     if (isCurrent) cls += " current";
-    if (isItemDue) cls += " due";
     if (isIgnored) cls += " ignored";
     arr.push(`<button class="${cls}" data-action="explorer-select" data-index="${idx}" title="${escapeHtml(JA_GLOSS[k.Kanji] || "")}">${k.Kanji}${isKnown && !isCurrent ? '<span class="cell-dot"></span>' : ""}<span class="cell-freq">${k.Frequency || ""}</span></button>`);
   });
@@ -818,8 +734,7 @@ function updateExplorerFilterUi(el) {
   const knownCount = state.knownSet.size;
   const ignoredCount = state.ignoredSet.size;
   const unknownCount = state.kanjiData.length - knownCount - ignoredCount;
-  const dueCount = getDueCount(state.kanjiData, state.knownSet, state.srsData);
-  const counts = { all: state.kanjiData.length, unknown: unknownCount, known: knownCount, due: dueCount, ignored: ignoredCount };
+  const counts = { all: state.kanjiData.length, unknown: unknownCount, known: knownCount, ignored: ignoredCount };
   el.querySelectorAll(".explorer-filter").forEach((btn) => {
     const id = btn.dataset.action.slice("filter-".length);
     btn.classList.toggle("active", id === filter);
@@ -844,24 +759,7 @@ function renderSettingsBody() {
   const total = state.kanjiData.length;
   const known = state.knownSet.size;
   const unknown = total - known;
-  const dueCount = getDueCount(state.kanjiData, state.knownSet, state.srsData);
   const pct = total > 0 ? ((known / total) * 100).toFixed(1) : "0.0";
-
-  const stabilityValues = Object.values(state.srsData)
-    .filter((e) => e && typeof e.stability === "number" && e.stability > 0)
-    .map((e) => e.stability);
-  const avgStability = stabilityValues.length > 0
-    ? stabilityValues.reduce((a, b) => a + b, 0) / stabilityValues.length
-    : null;
-  const avgStabilityLabel = avgStability === null
-    ? "—"
-    : avgStability < 1
-      ? `${Math.round(avgStability * 24)}h`
-      : avgStability < 30
-        ? `${avgStability.toFixed(1)}d`
-        : avgStability < 365
-          ? `${Math.round(avgStability / 30)}mo`
-          : `${(avgStability / 365).toFixed(1)}y`;
 
   const strokeOptions = Object.entries(STROKE_ORDER_SITES).map(([key, site]) =>
     `<option value="${key}" ${state.strokeOrderSite === key ? "selected" : ""}>${escapeHtml(site.label)}</option>`
@@ -894,10 +792,6 @@ function renderSettingsBody() {
         <div class="big-stat">
           <div class="big-stat-label">未習</div>
           <div class="big-stat-num">${unknown}</div>
-        </div>
-        <div class="big-stat">
-          <div class="big-stat-label">復習</div>
-          <div class="big-stat-num">${dueCount}</div>
         </div>
         <div class="big-stat">
           <div class="big-stat-label">達成</div>
@@ -1020,10 +914,9 @@ function renderSettingsBody() {
         ${renderShortcut(["←", "→"], "移動")}
         ${renderShortcut(["空白"], "次へ")}
         ${renderShortcut(["Enter"], "習得")}
-        ${renderShortcut(["1","2","3","4"], "復習評価")}
         ${renderShortcut(["S"], "筆順")}
         ${renderShortcut(["E"], "一覧")}
-        ${renderShortcut(["R"], "復習")}
+        ${renderShortcut(["R"], "想起")}
         ${renderShortcut(["D"], "昼夜")}
         ${renderShortcut(["U"], "取消")}
         ${renderShortcut(["Esc"], "戻る")}
@@ -1038,14 +931,6 @@ function renderSettingsBody() {
         <span class="reset-btn-ja">初期化</span>
         <span class="reset-btn-sub">全消去</span>
       </button>
-
-      <div class="settings-row" style="margin-top: 24px;">
-        <div class="settings-row-label">
-          <span class="settings-row-ja">FSRS 平均安定度</span>
-          <span class="settings-row-sub">Stability</span>
-        </div>
-        <span class="big-stat-num" style="font-size: 22px;">${avgStabilityLabel}</span>
-      </div>
 
       <div class="settings-footer">
         <div class="settings-footer-title kanji">練習</div>
@@ -1351,18 +1236,7 @@ function toggleStrokeNumbers() {
 
 function nextKanji() {
   state.revealed = false;
-  if (state.mode === "review") {
-    const due = getDue().filter((k) => !state.ignoredSet.has(k.Kanji));
-    if (due.length === 0) { showToast("復習なし"); return; }
-    const scored = due.map((k) => ({
-      kanji: k,
-      score: Date.now() - (state.srsData[k.Kanji]?.lastReview || state.srsData[k.Kanji]?.last_review || 0),
-    }));
-    scored.sort((a, b) => b.score - a.score);
-    const top = scored.slice(0, Math.min(5, scored.length));
-    const pick = top[Math.floor(Math.random() * top.length)];
-    state.currentIndex = state.kanjiData.indexOf(pick.kanji);
-  } else if (state.mode === "random") {
+  if (state.mode === "random") {
     const unknown = state.kanjiData
       .map((k, i) => ({ k, i }))
       .filter(({ k }) => !state.knownSet.has(k.Kanji) && !state.ignoredSet.has(k.Kanji));
@@ -1412,17 +1286,14 @@ function toggleKnown() {
   const kanji = getCurrentKanji();
   if (state.knownSet.has(kanji.Kanji)) {
     state.knownSet.delete(kanji.Kanji);
-    delete state.srsData[kanji.Kanji];
     state.lastAction = null;
     showToast("解除");
   } else {
     state.knownSet.add(kanji.Kanji);
-    state.srsData[kanji.Kanji] = createSrsEntry();
     state.lastAction = { type: "mark", kanji: kanji.Kanji };
     showToast("習得");
   }
   saveKnown();
-  saveSrs();
   render();
 }
 
@@ -1430,10 +1301,8 @@ function markKnownAndNext() {
   const kanji = getCurrentKanji();
   if (!state.knownSet.has(kanji.Kanji)) {
     state.knownSet.add(kanji.Kanji);
-    state.srsData[kanji.Kanji] = createSrsEntry();
     state.lastAction = { type: "mark", kanji: kanji.Kanji };
     saveKnown();
-    saveSrs();
   }
   nextKanji();
 }
@@ -1442,40 +1311,17 @@ function undoLastAction() {
   if (!state.lastAction) return;
   const { kanji } = state.lastAction;
   state.knownSet.delete(kanji);
-  delete state.srsData[kanji];
   state.lastAction = null;
   saveKnown();
-  saveSrs();
   showToast("取消");
   render();
-}
-
-function rateSrs(quality) {
-  const kanji = getCurrentKanji();
-  if (!state.knownSet.has(kanji.Kanji)) {
-    state.knownSet.add(kanji.Kanji);
-    state.srsData[kanji.Kanji] = createSrsEntry();
-    saveKnown();
-  }
-  const entry = state.srsData[kanji.Kanji] || createSrsEntry();
-  state.srsData[kanji.Kanji] = reviewCard(entry, quality);
-  saveSrs();
-  nextKanji();
 }
 
 function setMode(mode) {
   state.mode = mode;
   state.revealed = false;
   saveMode();
-  if (mode === "review") {
-    const due = getDue();
-    if (due.length > 0) {
-      state.currentIndex = state.kanjiData.indexOf(due[0]);
-      saveIndex();
-    } else {
-      showToast("復習なし");
-    }
-  } else if (mode === "recall") {
+  if (mode === "recall") {
     const known = state.kanjiData.filter((k) => state.knownSet.has(k.Kanji));
     if (known.length > 0) {
       state.currentIndex = state.kanjiData.indexOf(known[Math.floor(Math.random() * known.length)]);
@@ -1512,10 +1358,9 @@ function openLookUp() {
 
 function exportProgress() {
   const data = {
-    version: "3.1",
+    version: "4.0",
     known: [...state.knownSet],
     ignored: [...state.ignoredSet],
-    srs: state.srsData,
     timestamp: new Date().toISOString(),
     total: state.kanjiData.length,
   };
@@ -1542,18 +1387,9 @@ function importProgress() {
         const data = JSON.parse(ev.target.result);
         if (data.known) { state.knownSet = new Set(data.known); saveKnown(); }
         if (data.ignored) { state.ignoredSet = new Set(data.ignored); saveIgnored(); }
-        if (data.srs) {
-          const { data: migrated } = migrateSrsData(data.srs);
-          state.srsData = migrated;
-          saveSrs();
-        }
         if (data.practiced && !data.known) {
           state.knownSet = new Set(data.practiced);
           saveKnown();
-          for (const k of data.practiced) {
-            if (!state.srsData[k]) state.srsData[k] = createSrsEntry();
-          }
-          saveSrs();
         }
         render();
         if (state.activeView) renderView();
@@ -1584,12 +1420,10 @@ function importSyncCode() {
   for (const k of imported) {
     if (!state.knownSet.has(k)) {
       state.knownSet.add(k);
-      if (!state.srsData[k]) state.srsData[k] = createSrsEntry();
       added++;
     }
   }
   saveKnown();
-  saveSrs();
   input.value = "";
   render();
   if (state.activeView) renderView();
@@ -1602,10 +1436,8 @@ function resetProgress() {
     "全ての記録を消去します。この操作は取り消せません。",
     () => {
       state.knownSet.clear();
-      state.srsData = {};
       state.lastAction = null;
       saveKnown();
-      saveSrs();
       render();
       if (state.activeView) renderView();
       showToast("初期化完了");
@@ -1711,7 +1543,6 @@ document.addEventListener("click", (e) => {
     case "filter-all": state.explorerFilter = "all"; renderView(); break;
     case "filter-known": state.explorerFilter = "known"; renderView(); break;
     case "filter-unknown": state.explorerFilter = "unknown"; renderView(); break;
-    case "filter-due": state.explorerFilter = "due"; renderView(); break;
     case "filter-ignored": state.explorerFilter = "ignored"; renderView(); break;
     case "export": exportProgress(); break;
     case "import": importProgress(); break;
@@ -1731,12 +1562,6 @@ document.addEventListener("click", (e) => {
     case "mode-study": setMode("study"); break;
     case "mode-random": setMode("random"); break;
     case "mode-recall": setMode("recall"); break;
-    case "mode-review": setMode("review"); break;
-
-    case "srs-1": rateSrs(1); break;
-    case "srs-3": rateSrs(3); break;
-    case "srs-4": rateSrs(4); break;
-    case "srs-5": rateSrs(5); break;
 
     default:
       // accent-*
@@ -1822,27 +1647,7 @@ document.addEventListener("keydown", (e) => {
       break;
     case "s": case "S": e.preventDefault(); openStrokeOrder(); break;
     case "u": case "U": e.preventDefault(); undoLastAction(); break;
-    case "1":
-      e.preventDefault();
-      if (state.mode === "review" || (state.mode === "recall" && state.revealed)) rateSrs(1);
-      break;
-    case "2":
-      e.preventDefault();
-      if (state.mode === "review" || (state.mode === "recall" && state.revealed)) rateSrs(3);
-      break;
-    case "3":
-      e.preventDefault();
-      if (state.mode === "review" || (state.mode === "recall" && state.revealed)) rateSrs(4);
-      break;
-    case "4":
-      e.preventDefault();
-      if (state.mode === "review" || (state.mode === "recall" && state.revealed)) rateSrs(5);
-      break;
-    case "r": case "R":
-      e.preventDefault();
-      if (e.shiftKey) setMode("recall");
-      else setMode("review");
-      break;
+    case "r": case "R": e.preventDefault(); setMode("recall"); break;
   }
 });
 
